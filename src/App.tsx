@@ -39,13 +39,15 @@ export default function App() {
   const canvasContainerRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const { gifData, loading, error, parseFile, reset } = useGifParser()
+  const { gifData, loading, progress, error, parseFile, reset } = useGifParser()
   const { canvasRef } = useGifPlayer({
     gifData,
     currentFrame,
     isPlaying,
     onFrameChange: setCurrentFrame,
     playbackSpeed,
+    zoom,
+    pan,
   })
 
   // Reset state on new GIF
@@ -280,15 +282,32 @@ export default function App() {
             >
               Try gifcap.dev
             </a>
-          </p>
+          &nbsp; (Unaffiliated)</p>
         </main>
       )}
 
       {/* Loading */}
       {loading && (
-        <main className="flex-1 flex flex-col items-center justify-center gap-3">
-          <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-          <p className="text-gray-400">Parsing GIF...</p>
+        <main className="flex-1 flex flex-col items-center justify-center gap-4 px-8">
+          <p className="text-gray-400 text-sm">
+            {progress === 0 ? 'Decompressing GIF...' : `Compositing frames... ${Math.round(progress * 100)}%`}
+          </p>
+          <div className="w-full max-w-xs h-2 bg-gray-800 rounded-full overflow-hidden">
+            {progress === 0 ? (
+              // Indeterminate pulse while decompressFrames blocks
+              <div className="h-full w-1/3 bg-indigo-500 rounded-full animate-[indeterminate_1.4s_ease-in-out_infinite]" />
+            ) : (
+              <div
+                className="h-full bg-indigo-500 rounded-full transition-all duration-100"
+                style={{ width: `${Math.round(progress * 100)}%` }}
+              />
+            )}
+          </div>
+          {progress > 0 && (
+            <p className="text-xs text-gray-600 tabular-nums">
+              {Math.round(progress * 100)}% complete
+            </p>
+          )}
         </main>
       )}
 
@@ -310,32 +329,11 @@ export default function App() {
             onMouseLeave={stopPanning}
             onDoubleClick={resetZoom}
           >
-            {/* Centred + transformed canvas wrapper */}
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div
-                style={{
-                  width: '100%',
-                  height: '100%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-                  transformOrigin: 'center center',
-                }}
-              >
-                <canvas
-                  ref={canvasRef}
-                  width={gifData.width}
-                  height={gifData.height}
-                  style={{
-                    imageRendering: 'pixelated',
-                    display: 'block',
-                    maxWidth: '100%',
-                    maxHeight: '100%',
-                  }}
-                />
-              </div>
-            </div>
+            {/* Canvas fills the whole stage - buffer sized & drawn by useGifPlayer */}
+            <canvas
+              ref={canvasRef}
+              className="absolute inset-0 w-full h-full"
+            />
 
             {/* Overlay: zoom badge + close */}
             <div className="absolute top-2 right-2 flex items-center gap-1.5 pointer-events-auto">
@@ -483,7 +481,7 @@ export default function App() {
           <span className="hidden sm:inline">Browser-only, no uploads</span>
         </div>
         <a
-          href="https://github.com/jere-mie"
+          href="https://jeremie.bornais.ca"
           target="_blank"
           rel="noopener noreferrer"
           className="hover:text-gray-400 transition-colors"

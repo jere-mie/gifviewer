@@ -12,19 +12,27 @@ export interface GifData {
   height: number
 }
 
+const yield_ = () => new Promise<void>((r) => setTimeout(r, 0))
+
 export function useGifParser() {
   const [gifData, setGifData] = useState<GifData | null>(null)
   const [loading, setLoading] = useState(false)
+  const [progress, setProgress] = useState(0) // 0-1
   const [error, setError] = useState<string | null>(null)
 
   const parseFile = useCallback(async (file: File) => {
     setLoading(true)
+    setProgress(0)
     setError(null)
     setGifData(null)
+
+    // Yield once so React can render the loading state before we block
+    await yield_()
 
     try {
       const arrayBuffer = await file.arrayBuffer()
       const gif = parseGIF(arrayBuffer)
+      // decompressFrames is synchronous and may block for large GIFs
       const rawFrames = decompressFrames(gif, true)
 
       if (!rawFrames.length) {
@@ -32,50 +40,49 @@ export function useGifParser() {
       }
 
       const { width, height } = rawFrames[0].dims
+      const total = rawFrames.length
 
-      // We need a persistent canvas to handle disposal methods correctly
       const canvas = document.createElement('canvas')
       canvas.width = width
       canvas.height = height
       const ctx = canvas.getContext('2d')!
 
+      const tempCanvas = document.createElement('canvas')
+      const tempCtx = tempCanvas.getContext('2d')!
+
       const frames: GifFrame[] = []
 
-      for (const frame of rawFrames) {
+      for (let i = 0; i < total; i++) {
+        const frame = rawFrames[i]
         const { dims, patch, delay, disposalType } = frame
 
-        // Save previous frame state for disposal
         const prevImageData = ctx.getImageData(0, 0, width, height)
 
-        // If disposal is "restore to background" (2), clear the area first
         if (disposalType === 2) {
           ctx.clearRect(dims.left, dims.top, dims.width, dims.height)
         }
 
-        // Draw the patch onto a temporary ImageData
-        const patchData = new ImageData(
-          new Uint8ClampedArray(patch),
-          dims.width,
-          dims.height
-        )
-        const tempCanvas = document.createElement('canvas')
-        tempCanvas.width = dims.width
-        tempCanvas.height = dims.height
-        const tempCtx = tempCanvas.getContext('2d')!
+        if (tempCanvas.width !== dims.width || tempCanvas.height !== dims.height) {
+          tempCanvas.width = dims.width
+          tempCanvas.height = dims.height
+        }
+        const patchData = new ImageData(new Uint8ClampedArray(patch), dims.width, dims.height)
         tempCtx.putImageData(patchData, 0, 0)
-
         ctx.drawImage(tempCanvas, dims.left, dims.top)
 
-        // Capture the full frame
-        const frameImageData = ctx.getImageData(0, 0, width, height)
         frames.push({
-          imageData: frameImageData,
-          delay: Math.max(delay || 100, 20), // default 100ms, min 20ms
+          imageData: ctx.getImageData(0, 0, width, height),
+          delay: Math.max(delay || 100, 20),
         })
 
-        // Handle disposal: restore previous if type 3
         if (disposalType === 3) {
           ctx.putImageData(prevImageData, 0, 0)
+        }
+
+        // Yield every 4 frames to update progress UI
+        if (i % 4 === 3 || i === total - 1) {
+          setProgress((i + 1) / total)
+          await yield_()
         }
       }
 
@@ -84,6 +91,7 @@ export function useGifParser() {
       setError(err instanceof Error ? err.message : 'Failed to parse GIF')
     } finally {
       setLoading(false)
+      setProgress(0)
     }
   }, [])
 
@@ -91,7 +99,8 @@ export function useGifParser() {
     setGifData(null)
     setError(null)
     setLoading(false)
+    setProgress(0)
   }, [])
 
-  return { gifData, loading, error, parseFile, reset }
+  return { gifData, loading, progress, error, parseFile, reset }
 }
